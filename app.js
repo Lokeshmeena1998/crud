@@ -1,19 +1,12 @@
 const express = require('express');
-const bodyParser = require('body-parser');
-const fs = require ('fs');
 const path = require('path');
 const multer = require('multer');
-const product = require('./node_modules/product')
-
-
-
+const productModel = require('./models/product');
 
 const app = express();
-app.use(bodyParser.json());
-
-
-
-
+app.use(express.json());
+app.use(express.static(path.join(__dirname, 'public')));
+app.use('/uploads', express.static('./uploads'));
 
 const storage = multer.diskStorage({
     destination: "uploads",
@@ -32,103 +25,86 @@ const upload = multer({
         ) {
             callback(null, true)
         } else {
-            console.log('only  png , jpg & jpeg file supported')
-            callback(null, false)
+            callback(new Error('Only PNG, JPG, and JPEG files are supported'));
         }
     },
     limits: {
-        filesize: 100000000000 //1000000 bytes=1MB
+        fileSize: 1000000 // 1MB limit
     }
 });
 
-
-
-
-// insert api
-app.post('/api/product/insert') = async (req, res) => {
-    const { productId, productName, productDescription, productImages, inActive } = req.body;
+// Product Insertion API
+app.post('/api/product/insert', upload.single('productImage'), async (req, res) => {
+    const { productId, productName, productDescription, inActive } = req.body;
+    const productImage = req.file.path; // Assuming 'productImage' is the name of the file input
     try {
-        const create_product = await product({ productId, productName, productDescription, productImages: req.file.filename, inActive })
-        if (!create_product) {
-            res.status(400).json({ sucess: "false", msg: 'Not insert the product' });
-        } else {
-            const data = await create_product.save();
-            res.status(201).json({ sucess: "true", msg: 'your product are create sucsesfully', data: create_product });
-        }
-    }
-    catch (error) {
-        res.status(400).json({ result: "false", message: error.message });
-    };
-};
-
-
-
-app.get('/api/product/:productId') = async (req, res) => {
-    const { productId } = req.body
-    try {
-        const get_product = await product.findById({ productId })
-        const data = await get_product.save()
-        res.status(200).json({ result: "true", mess: " your id get sucsesfully ", data: data })
+        const createProduct = await productModel.create({ productId, productName, productDescription, productImage, inActive });
+        res.status(201).json({ success: true, message: 'Product created successfully', data: createProduct });
     } catch (error) {
-        res.status(400).json({ result: "false", message: error.message })
+        res.status(400).json({ success: false, message: error.message });
     }
-}
+});
 
+// Get Product by ID
+app.get('/api/product/:productId', async (req, res) => {
+    const { productId } = req.params;
+    try {
+        const getProduct = await productModel.findById(productId);
+        if (!getProduct) {
+            res.status(404).json({ success: false, message: 'Product not found' });
+            return;
+        }
+        res.status(200).json({ success: true, message: 'Product retrieved successfully', data: getProduct });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
 
-
-app.get('/api/product/active') = async (req, res) => {
+// Get Active Products with Pagination
+app.get('/api/product/active', async (req, res) => {
     const page = parseInt(req.query.page) || 1;
     const perPage = 10;
-    const skip = (page - 10) * perPage
+    const skip = (page - 1) * perPage;
     try {
-        const product = await product.find({ active: true }).skip(skip).limit(perPage)
-        res.status(201).json({ result: "true", mess: "suc" })
+        const activeProducts = await productModel.find({ inActive: false }).skip(skip).limit(perPage);
+        res.status(200).json({ success: true, message: 'Active products retrieved successfully', data: activeProducts });
     } catch (error) {
-        res.status(500).json({ result: "false", message: error.message })
+        res.status(500).json({ success: false, message: error.message });
     }
-}
+});
 
-
-app.put('/api/product/update/:productId') = async (req, res) => {
-    const { productId, productName, productDescription, productImages, inActive } = req.body
+// Update Product by ID
+app.put('/api/product/update/:productId', async (req, res) => {
+    const { productId } = req.params;
+    const { productName, productDescription, inActive } = req.body;
     try {
-        const product = await product.findById({ productId: productId })
-        if (!product) {
-            res.status(400).json({ result: "false", mess: "user ID not found" })
+        const updatedProduct = await productModel.findByIdAndUpdate(productId, { productName, productDescription, inActive }, { new: true });
+        if (!updatedProduct) {
+            res.status(404).json({ success: false, message: 'Product not found' });
+            return;
         }
-        else {
-            const product_update = await product.findByIdAndUpdate({ productId: productId }, { $set: { productId, productName, productDescription, productImages, inActive } })
-            const user_data = await product_update.save()
-            res.status(200).json({ result: "true", mess: " your product are sucsesfully upload", data: user_data })
-        }
-    }
-    catch (error) {
-        res.status(400).json({ result: "false", message: error.message })
-    }
-}
-
-
-
-
-app.delete('/api/product/delete/:productId') = async (req, res) => {
-    const { productId } = req.body
-    try {
-        const product_delete = await product.findOneAndDelete({ productId })
-        const data = await product_delete.save()
-        res.status(200).json({ result: "true", mess: " your product delete", data: data })
-
-
+        res.status(200).json({ success: true, message: 'Product updated successfully', data: updatedProduct });
     } catch (error) {
-        res.status(400).json({ result: "false", message: error.message })
+        res.status(500).json({ success: false, message: error.message });
     }
-}
+});
 
-
-const port = process.env.port || 8000;
-app.listen(port, function (error) {
-    if (error) {
-        console.log(error)
-    } else {
-        console.log("The server is running at port 8000");
+// Delete Product by ID
+app.delete('/api/product/delete/:productId', async (req, res) => {
+    const { productId } = req.params;
+    try {
+        const deletedProduct = await productModel.findByIdAndDelete(productId);
+        if (!deletedProduct) {
+            res.status(404).json({ success: false, message: 'Product not found' });
+            return;
+        }
+        res.status(200).json({ success: true, message: 'Product deleted successfully', data: deletedProduct });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
     }
-});   
+});
+
+const port = process.env.PORT || 8000;
+app.listen(port, () => {
+    console.log(`Server is running on port ${port}`);
+});
